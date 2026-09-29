@@ -1,0 +1,28 @@
+<section id="ghostwriting-settings" class="ghostwriting-settings inline-drawer">
+    <div class="inline-drawer-toggle inline-drawer-header">
+        <b>Ghostwriting</b>
+        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+    </div>
+    <div class="inline-drawer-content">
+        <label class="ghostwriting-checkbox"><input id="ghostwriting-enabled" type="checkbox">Ghostwriting 사용</label>
+        <label for="ghostwriting-profile">변환용 연결 프로필</label><select id="ghostwriting-profile" class="text_pole"></select>
+        <p class="ghostwriting-muted">응답 길이는 선택한 연결 프로필의 생성 프리셋 또는 메인 API 설정을 따릅니다. 결과가 중간에 끊기면 해당 응답 길이를 늘려 주세요.</p>
+        <label for="ghostwriting-output-language">출력 언어</label>
+        <select id="ghostwriting-output-language" class="text_pole">
+            <option value="en">영어 (기본값)</option>
+            <option value="ko">한국어</option>
+        </select>
+        <label for="ghostwriting-preset">공통 프롬프트 프리셋</label>
+        <div class="ghostwriting-preset-row">
+            <select id="ghostwriting-preset" class="text_pole"></select>
+            <div class="ghostwriting-preset-actions">
+                <button type="button" class="menu_button" data-action="copy" title="새 이름으로 저장" aria-label="새 이름으로 저장"><i class="fa-solid" aria-hidden="true">&#xf0c7;</i></button>
+                <button type="button" class="menu_button" data-action="rename" title="이름 변경" aria-label="이름 변경"><i class="fa-solid" aria-hidden="true">&#xf044;</i></button>
+                <button type="button" class="menu_button" data-action="delete" title="삭제" aria-label="삭제"><i class="fa-solid" aria-hidden="true">&#xf1f8;</i></button>
+                <button type="button" class="menu_button" data-action="reset" title="기본 문안으로 복원" aria-label="기본 문안으로 복원"><i class="fa-solid" aria-hidden="true">&#xf2ea;</i></button>
+            </div>
+        </div>
+        <label for="ghostwriting-prompt">프롬프트 원문</label><textarea id="ghostwriting-prompt" class="text_pole" rows="12" spellcheck="false"></textarea>
+        <p class="ghostwriting-muted">전체적으로 적용되는 프롬프트를 입력하세요. 묘사 범위·분량·최근 메시지 수·페르소나별 지시사항은 마법봉에서 설정합니다.</p>
+    </div>
+</section>

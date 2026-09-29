@@ -1,0 +1,20 @@
+{
+    "display_name": "Ghostwriting",
+    "description": "입력된 내용을 맥락과 성격에 맞게 확장합니다.",
+    "loading_order": 50,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Ghostwriting",
+    "version": "1.0.0",
+        "homePage": "https://github.com/st-chd/Ghostwriting",
+    "minimum_client_version": "1.19.0",
+    "hooks": {
+        "activate": "init",
+        "enable": "init",
+        "disable": "dispose",
+        "clean": "onClean",
+        "delete": "onDelete"
+    }
+}
