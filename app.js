@@ -1,8 +1,11 @@
-import { DEFAULT_PROMPT, DRAFT_PREFIX, MAIN_API_PROFILE_ID, MAX_RECENT_MESSAGES, MAX_VERSIONS, DraftSession, buildMessages, completeRequest, normalizeRecentCount, normalizeSettings } from './core.js';
+import { DEFAULT_PROMPT, DRAFT_PREFIX, MAIN_API_PROFILE_ID, MAX_RECENT_MESSAGES, MAX_VERSIONS, DraftSession, buildMessages, completeRequest, getActivePreset, normalizeLanguage, normalizeRecentCount, normalizeSettings } from './core.js';
 
 const GHOSTWRITING_ICON = '<i class="fa-solid" aria-hidden="true">&#xf52d;</i>';
 const UNDO_ICON = '<i class="fa-solid" aria-hidden="true">&#xf2ea;</i>';
 const STOP_ICON = '<i class="fa-solid" aria-hidden="true">&#xf04d;</i>';
+const PERSIST_DEBOUNCE_MS = 250;
+const SWIPE_MIN_PX = 45;
+const SWIPE_RATIO = 1.5;
 
 function button(id, label, icon, nativeControl = false) {
     const node = document.createElement(nativeControl ? 'div' : 'button');
@@ -42,6 +45,7 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
     let quickPopup = null;
     let quickView = null;
     let quickLife = null;
+    let lastBusy = null;
 
     const template = document.createElement('template');
     template.innerHTML = settingsHtml;
@@ -93,11 +97,11 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
     const menuEntry = document.createElement('div');
     menuEntry.id = 'ghostwriting-wand';
     menuEntry.className = 'extension_container';
-    const open = document.createElement('button');
-    open.type = 'button';
-    open.className = 'list-group-item flex-container';
-    open.innerHTML = `${GHOSTWRITING_ICON}<span>Ghostwriting 설정</span>`;
-    menuEntry.append(open);
+    const openSettingsButton = document.createElement('button');
+    openSettingsButton.type = 'button';
+    openSettingsButton.className = 'list-group-item flex-container';
+    openSettingsButton.innerHTML = `${GHOSTWRITING_ICON}<span>Ghostwriting 설정</span>`;
+    menuEntry.append(openSettingsButton);
     menu.append(menuEntry);
 
     function persist() {
@@ -128,22 +132,40 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
         if (returnFocus && !controls.hidden) write.focus();
     }
 
+    function commit(nextText) {
+        setInput(nextText);
+        closeList();
+        render();
+        persist();
+        editor.focus();
+    }
+
+    function writeLabel() {
+        if (request) return '작성 취소';
+        if (!session.versions.length || session.isNewDraft(editor.value)) {
+            return settings.outputLanguage === 'ko' ? '한국어로 작성' : '영어로 작성';
+        }
+        return list.hidden ? '변환 결과 목록 열기' : '재작성';
+    }
+
     function render() {
         const busy = Boolean(request);
         controls.hidden = !settings.enabled;
         menuEntry.hidden = !settings.enabled;
-        write.innerHTML = busy ? STOP_ICON : GHOSTWRITING_ICON;
-        const label = busy ? '작성 취소' : !session.versions.length || session.isNewDraft(editor.value)
-            ? settings.outputLanguage === 'ko' ? '한국어로 작성' : '영어로 작성'
-            : list.hidden ? '변환 결과 목록 열기' : '재작성';
+        if (lastBusy !== busy) {
+            write.innerHTML = busy ? STOP_ICON : GHOSTWRITING_ICON;
+            lastBusy = busy;
+        }
+        const label = writeLabel();
         write.title = label;
         write.setAttribute('aria-label', label);
         write.classList.toggle('ghostwriting-busy', busy);
         write.setAttribute('aria-expanded', String(!list.hidden));
         undo.hidden = session.selected < 0;
         undo.setAttribute('aria-disabled', String(busy));
-        status.textContent = busy ? '작성 중입니다. 깃펜 자리의 버튼으로 취소할 수 있습니다.'
+        const statusText = busy ? '작성 중입니다. 깃펜 자리의 버튼으로 취소할 수 있습니다.'
             : session.selected >= 0 ? `${session.versions.length}개 결과 중 ${session.selected + 1}번째 결과` : '';
+        if (status.textContent !== statusText) status.textContent = statusText;
     }
 
     function positionList() {
@@ -166,7 +188,7 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
         preview.textContent = session.versions[viewedIndex];
         preview.scrollTop = 0;
         previous.disabled = next.disabled = session.versions.length < 2;
-        const nextIndex = (session.latestIndex + 1) % MAX_VERSIONS + 1;
+        const nextIndex = session.nextVersionIndex() + 1;
         heading.textContent = session.versions.length === MAX_VERSIONS
             ? `깃펜을 다시 누르면 재작성 · ${nextIndex}을 덮어씁니다. (최대 ${MAX_VERSIONS}개)`
             : `깃펜을 다시 누르면 재작성 · ${nextIndex}을 만듭니다. (최대 ${MAX_VERSIONS}개)`;
@@ -210,7 +232,7 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
             return;
         }
         let data;
-        try { data = host.getContextData(); } catch (error) { host.notify(error.message, 'warning'); return; }
+        try { data = host.getContextData(settings.recentCount); } catch (error) { host.notify(error.message, 'warning'); return; }
         const inputBefore = editor.value;
         let messages;
         try {
@@ -257,7 +279,8 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
 
     async function onWrite(event) {
         if (request) { request.abort(); return; }
-        session.edit(editor.value);
+        if (session.original && editor.value !== session.input) session.start(editor.value);
+        else session.edit(editor.value);
         if (session.versions.length && !session.isNewDraft(editor.value) && list.hidden) {
             showList();
             if (event?.detail === 0) preview.focus({ preventScroll: true });
@@ -270,7 +293,7 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
     function restore() {
         if (!session.original) return;
         if (!editor.value || editor.value === session.input) setInput(session.input);
-        else session.edit(editor.value);
+        else session.start(editor.value);
         render();
     }
 
@@ -296,22 +319,19 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
     listen(undo, 'click', () => {
         if (request) return;
         session.edit(editor.value);
-        setInput(session.select(-1));
-        closeList();
-        render();
-        persist();
-        editor.focus();
+        commit(session.select(-1));
     });
-    listen(editor, 'input', () => {
+    listen(editor, 'input', event => {
         if (internalEdit || editor.value === session.input) return;
         // 다른 확장이 작성 도중 입력을 바꾸면 해당 요청을 중단하고 새 입력을 보존한다.
         if (request) request.abort();
         if (!editor.value.trim()) { clearDraft(); return; }
-        session.edit(editor.value);
+        if (!event.isTrusted && session.original) session.start(editor.value);
+        else session.edit(editor.value);
         closeList();
         render();
         clearTimeout(saveTimer);
-        saveTimer = setTimeout(persist, 250);
+        saveTimer = setTimeout(persist, PERSIST_DEBOUNCE_MS);
     });
     listen(editor, 'beforeinput', event => {
         if (internalEdit || request || !editor.value.length) return;
@@ -324,11 +344,7 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
     listen(apply, 'click', () => {
         if (request) return;
         session.edit(editor.value);
-        setInput(session.select(viewedIndex));
-        closeList();
-        render();
-        persist();
-        editor.focus();
+        commit(session.select(viewedIndex));
     });
     listen(empty, 'click', () => {
         if (request) return;
@@ -348,7 +364,7 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
         const dx = event.clientX - swipeStart.x;
         const dy = event.clientY - swipeStart.y;
         swipeStart = null;
-        if (Math.abs(dx) >= 45 && Math.abs(dx) > Math.abs(dy) * 1.5) browseResult(dx < 0 ? 1 : -1);
+        if (Math.abs(dx) >= SWIPE_MIN_PX && Math.abs(dx) > Math.abs(dy) * SWIPE_RATIO) browseResult(dx < 0 ? 1 : -1);
     });
     listen(preview, 'pointercancel', () => { swipeStart = null; });
     listen(document, 'pointerdown', event => {
@@ -394,8 +410,11 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
             request?.abort(); session.clear(); closeList(); render();
         }
     });
-    listen(open, 'click', openQuickSettings);
-    disposers.push(host.on('MESSAGE_SENT', clearDraft));
+    listen(openSettingsButton, 'click', openQuickSettings);
+    disposers.push(host.on('MESSAGE_SENT', messageId => {
+        const sentText = host.sentMessageText(messageId);
+        if (!editor.value.trim() || (typeof sentText === 'string' && sentText.trim() === session.input.trim())) clearDraft();
+    }));
     for (const event of ['CHAT_CHANGED', 'PERSONA_CHANGED']) disposers.push(host.on(event, () => {
         if (request) {
             request.abort();
@@ -440,7 +459,7 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
         const select = panelView.querySelector('#ghostwriting-preset');
         select.replaceChildren(...settings.presets.map(p => new Option(p.name, p.id)));
         select.value = settings.activePreset;
-        panelView.querySelector('#ghostwriting-prompt').value = settings.presets.find(p => p.id === settings.activePreset).prompt;
+        panelView.querySelector('#ghostwriting-prompt').value = getActivePreset(settings)?.prompt || DEFAULT_PROMPT;
         panelView.querySelector('[data-action="delete"]').disabled = settings.activePreset === 'default';
     }
 
@@ -451,7 +470,7 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
         view.querySelector('#ghostwriting-output-language').value = settings.outputLanguage;
         view.addEventListener('input', event => {
             const field = event.target;
-            if (field.id === 'ghostwriting-prompt') settings.presets.find(p => p.id === settings.activePreset).prompt = field.value;
+            if (field.id === 'ghostwriting-prompt') getActivePreset(settings).prompt = field.value;
             saveSettings();
         }, { signal: lifetime.signal });
         view.addEventListener('change', event => {
@@ -462,18 +481,21 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
                 render();
             }
             if (field.id === 'ghostwriting-profile') settings.profileId = field.value;
-            if (field.id === 'ghostwriting-output-language') { settings.outputLanguage = field.value === 'ko' ? 'ko' : 'en'; render(); }
+            if (field.id === 'ghostwriting-output-language') { settings.outputLanguage = normalizeLanguage(field.value); render(); }
             if (field.id === 'ghostwriting-preset') { settings.activePreset = field.value; updatePresets(); }
             saveSettings();
         }, { signal: lifetime.signal });
         view.addEventListener('click', async event => {
             const action = event.target.closest('[data-action]')?.dataset.action;
             if (!action) return;
-            const preset = settings.presets.find(p => p.id === settings.activePreset);
+            const preset = getActivePreset(settings);
             if (action === 'copy' || action === 'rename') {
                 const name = (await host.askName(action === 'copy' ? `${preset.name} 복사본` : preset.name))?.trim();
                 if (!active || !name) return;
-                if (settings.presets.some(p => p.name === name && (action === 'copy' || p.id !== preset.id))) return host.notify('같은 이름의 프리셋이 있습니다.', 'warning');
+                if (settings.presets.some(p => p.name === name && (action === 'copy' || p.id !== preset.id))) {
+                    host.notify('같은 이름의 프리셋이 있습니다.', 'warning');
+                    return;
+                }
                 if (action === 'copy') {
                     const id = globalThis.crypto?.randomUUID?.() || `preset-${Date.now()}-${Math.random().toString(36).slice(2)}`;
                     const copy = { id, name, prompt: preset.prompt };
@@ -525,8 +547,10 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
             }
             saveSettings();
         }, { signal: quickLife.signal });
-        quickPopup = host.showPanel(view);
-        try { await quickPopup.done; }
+        try {
+            quickPopup = host.showPanel(view);
+            await quickPopup.done;
+        }
         finally {
             quickLife.abort();
             quickLife = null;
@@ -535,9 +559,29 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
         }
     }
 
-    initializeSettings();
-    restore();
-    render();
+    function dispose() {
+        if (!active) return;
+        persist();
+        active = false;
+        request?.abort();
+        request = null;
+        unlock();
+        lifetime.abort();
+        quickLife?.abort();
+        clearTimeout(saveTimer);
+        disposers.forEach(off => off());
+        void quickPopup?.close();
+        controls.remove(); list.remove(); panelView.remove(); menuEntry.remove();
+    }
+
+    try {
+        initializeSettings();
+        restore();
+        render();
+    } catch (error) {
+        dispose();
+        throw error;
+    }
     return {
         clearData() {
             cleared = true;
@@ -545,19 +589,6 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
             localStorage.removeItem(draftKey);
             host.removeSettings();
         },
-        dispose() {
-            if (!active) return;
-            persist();
-            active = false;
-            request?.abort();
-            request = null;
-            unlock();
-            lifetime.abort();
-            quickLife?.abort();
-            clearTimeout(saveTimer);
-            disposers.forEach(dispose => dispose());
-            void quickPopup?.close();
-            controls.remove(); list.remove(); panelView.remove(); menuEntry.remove();
-        },
+        dispose,
     };
 }

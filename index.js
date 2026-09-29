@@ -5,14 +5,14 @@ import { getCurrentUserHandle } from '../../../user.js';
 import { getPresetManager } from '../../../preset-manager.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 import { renderExtensionTemplateAsync } from '../../../extensions.js';
-import { SETTINGS_KEY, DRAFT_PREFIX, MAIN_API_PROFILE_ID, resolveTokenLimit } from './core.js';
+import { SETTINGS_KEY, DRAFT_PREFIX, MAIN_API_PROFILE_ID, describeError, normalizeRecentCount, resolveTokenLimit } from './core.js';
 import { createGhostwritingApp } from './app.js';
-import { requestMainApi } from './main-api.js';
 
 let app;
 let readyListener;
 let loading = false;
 let activation = 0;
+const fallbackNotified = new Set();
 const extensionPath = (() => {
     const path = new URL('.', import.meta.url).pathname;
     const marker = '/scripts/extensions/';
@@ -20,15 +20,8 @@ const extensionPath = (() => {
     return index >= 0 ? decodeURIComponent(path.slice(index + marker.length).replace(/\/$/, '')) : 'third-party/Ghostwriting';
 })();
 
-function errorDetail(value) {
-    let detail = value?.message ?? value?.error?.message ?? value?.error ?? value;
-    if (detail && typeof detail === 'object') {
-        try { detail = JSON.stringify(detail); } catch { detail = ''; }
-    }
-    return typeof detail === 'string' ? detail.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
-}
-
-function warnIfPossiblyTruncated(text, source) {
+function warnIfPossiblyTruncated(text, source, finish) {
+    if (finish) return;
     if (typeof text !== 'string' || !text.trim()) return;
     const last = text.trim().at(-1);
     if (!/[.!?…。！？'"”’*_\])}]/u.test(last)) {
@@ -42,19 +35,19 @@ function warnIfPossiblyTruncated(text, source) {
 
 function extractCompletedMessage(raw, api, source) {
     const finish = raw?.choices?.[0]?.finish_reason ?? raw?.stop_reason ?? raw?.candidates?.[0]?.finishReason;
+    if (raw?.error) {
+        const detail = describeError(raw.error);
+        throw new Error(`모델 서버가 오류를 반환했습니다${detail ? `: ${detail}` : ''}. 입력문을 유지합니다.`);
+    }
     if (['length', 'max_tokens', 'MAX_TOKENS', 'content_filter', 'SAFETY'].includes(finish)) {
         throw new Error(`응답이 완성되기 전에 종료되었습니다. ${source}의 응답 길이 설정을 확인해 주세요. 입력문을 유지합니다.`);
     }
-    if (raw?.error) {
-        const detail = errorDetail(raw.error);
-        throw new Error(`모델 서버가 오류를 반환했습니다${detail ? `: ${detail}` : ''}. 입력문을 유지합니다.`);
-    }
     const text = extractMessageFromData(raw, api);
-    warnIfPossiblyTruncated(text, source);
+    warnIfPossiblyTruncated(text, source, finish);
     return text;
 }
 
-function contextData() {
+function contextData(recentCount) {
     const context = getContext();
     if (context.groupId) throw new Error('Ghostwriting은 1:1 채팅에서 사용할 수 있습니다.');
     const card = context.characters[context.characterId];
@@ -64,6 +57,13 @@ function contextData() {
         name2Override: context.name2,
         replaceCharacterCard: false,
     });
+    const chat = [];
+    const count = normalizeRecentCount(recentCount);
+    for (let index = context.chat.length - 1; index >= 0 && chat.length < count; index--) {
+        const message = context.chat[index];
+        if (!message?.is_system && typeof message?.mes === 'string' && message.mes.trim()) chat.push(message);
+    }
+    chat.reverse();
     return {
         persona: {
             id: user_avatar || '__default__',
@@ -77,7 +77,8 @@ function contextData() {
             scenario: resolveMacros(context.chatMetadata.scenario || card.scenario || card.data?.scenario),
             example_dialogue: resolveMacros(context.chatMetadata.mes_example || card.mes_example || card.data?.mes_example),
         },
-        chat: context.chat.map(message => typeof message?.mes === 'string' ? { ...message, mes: resolveMacros(message.mes) } : message),
+        // 저장된 대화를 다시 매크로 평가하면 상태 변경 매크로가 재실행될 수 있다.
+        chat,
     };
 }
 
@@ -95,11 +96,12 @@ function makeHost() {
             context.saveSettingsDebounced();
         },
         getPersona: () => ({ id: user_avatar || '__default__', name: getContext().name1 }),
+        sentMessageText: messageId => getContext().chat[messageId]?.mes,
         getContextData: contextData,
         isGenerating,
         on: (name, callback) => {
             const type = context.eventTypes[name];
-            if (!type) return () => {};
+            if (!type) { console.warn(`Ghostwriting: 지원되지 않는 SillyTavern 이벤트: ${name}`); return () => {}; }
             context.eventSource.on(type, callback);
             return () => context.eventSource.removeListener(type, callback);
         },
@@ -113,6 +115,8 @@ function makeHost() {
             if (profileId === MAIN_API_PROFILE_ID) {
                 signal.throwIfAborted();
                 const api = getContext().mainApi;
+                const { requestMainApi } = await import('./main-api.js');
+                signal.throwIfAborted();
                 const raw = await requestMainApi(api, messages, signal);
                 signal.throwIfAborted();
                 return extractCompletedMessage(raw, api, '메인 API');
@@ -122,7 +126,10 @@ function makeHost() {
             const preset = profile.preset ? getPresetManager(api)?.getCompletionPresetByName(profile.preset) : null;
             if (profile.preset && !preset) throw new Error('연결 프로필의 생성 설정 프리셋을 찾을 수 없습니다. 프로필을 확인해 주세요.');
             const { maxTokens, usedFallback } = resolveTokenLimit(api, preset);
-            if (usedFallback) globalThis.toastr?.info('연결 프로필에 유효한 응답 길이가 없어 기본값 4,096토큰을 사용합니다.', 'Ghostwriting', { escapeHtml: true });
+            if (usedFallback && !fallbackNotified.has(profileId)) {
+                fallbackNotified.add(profileId);
+                globalThis.toastr?.info('연결 프로필에 유효한 응답 길이가 없어 기본값 4,096토큰을 사용합니다.', 'Ghostwriting', { escapeHtml: true });
+            }
             const raw = await ConnectionManagerRequestService.sendRequest(profileId, messages, maxTokens, {
                 signal, stream: false, extractData: false, includePreset: true, includeInstruct: true,
             }, { n: 1 });
@@ -158,6 +165,9 @@ export function init() {
     };
     const context = getContext();
     context.eventSource.on(context.eventTypes.APP_READY, readyListener);
+    if (['#send_textarea', '#send_but', '#extensions_settings', '#extensionsMenu'].every(selector => document.querySelector(selector))) {
+        void readyListener();
+    }
 }
 
 export function dispose() {
@@ -174,8 +184,10 @@ export function onClean() {
     if (app) app.clearData();
     else {
         host.removeSettings();
-        localStorage.removeItem(DRAFT_PREFIX + host.user);
     }
+    try {
+        for (const key of Object.keys(localStorage)) if (key.startsWith(DRAFT_PREFIX)) localStorage.removeItem(key);
+    } catch (error) { console.warn('Ghostwriting: 초안 저장소 정리 실패', error); }
     dispose();
 }
 
