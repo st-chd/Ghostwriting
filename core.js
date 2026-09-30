@@ -1,6 +1,8 @@
-export const SETTINGS_KEY = 'quill';
+export const SETTINGS_KEY = 'ghostwriting';
+export const LEGACY_SETTINGS_KEY = 'quill';
 export const MAIN_API_PROFILE_ID = '__ghostwriting_main_api__';
-export const DRAFT_PREFIX = 'st-quill:draft:v1:';
+export const DRAFT_PREFIX = 'st-ghostwriting:draft:v1:';
+export const LEGACY_DRAFT_PREFIX = 'st-quill:draft:v1:';
 export const MAX_RECENT_MESSAGES = 200;
 export const MAX_RECENT_CHARACTERS = 120000;
 export const MAX_VERSIONS = 3;

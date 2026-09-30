@@ -5,7 +5,7 @@ import { getCurrentUserHandle } from '../../../user.js';
 import { getPresetManager } from '../../../preset-manager.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 import { renderExtensionTemplateAsync } from '../../../extensions.js';
-import { SETTINGS_KEY, DRAFT_PREFIX, MAIN_API_PROFILE_ID, describeError, normalizeRecentCount, resolveTokenLimit } from './core.js';
+import { SETTINGS_KEY, LEGACY_SETTINGS_KEY, DRAFT_PREFIX, LEGACY_DRAFT_PREFIX, MAIN_API_PROFILE_ID, describeError, normalizeRecentCount, resolveTokenLimit } from './core.js';
 import { createGhostwritingApp } from './app.js';
 
 let app;
@@ -85,13 +85,22 @@ function makeHost() {
     const context = getContext();
     return {
         user: getCurrentUserHandle(),
-        loadSettings: () => context.extensionSettings[SETTINGS_KEY],
+        loadSettings: () => {
+            if (Object.hasOwn(context.extensionSettings, LEGACY_SETTINGS_KEY)) {
+                context.extensionSettings[SETTINGS_KEY] ??= context.extensionSettings[LEGACY_SETTINGS_KEY];
+                delete context.extensionSettings[LEGACY_SETTINGS_KEY];
+                context.saveSettingsDebounced();
+            }
+            return context.extensionSettings[SETTINGS_KEY];
+        },
         saveSettings: settings => {
             context.extensionSettings[SETTINGS_KEY] = settings;
+            delete context.extensionSettings[LEGACY_SETTINGS_KEY];
             context.saveSettingsDebounced();
         },
         removeSettings: () => {
             delete context.extensionSettings[SETTINGS_KEY];
+            delete context.extensionSettings[LEGACY_SETTINGS_KEY];
             context.saveSettingsDebounced();
         },
         getPersona: () => ({ id: user_avatar || '__default__', name: getContext().name1 }),
@@ -188,7 +197,9 @@ export function onClean() {
         host.removeSettings();
     }
     try {
-        for (const key of Object.keys(localStorage)) if (key.startsWith(DRAFT_PREFIX)) localStorage.removeItem(key);
+        for (const key of Object.keys(localStorage)) {
+            if (key.startsWith(DRAFT_PREFIX) || key.startsWith(LEGACY_DRAFT_PREFIX)) localStorage.removeItem(key);
+        }
     } catch (error) { console.warn('Ghostwriting: 초안 저장소 정리 실패', error); }
     dispose();
 }

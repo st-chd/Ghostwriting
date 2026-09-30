@@ -1,4 +1,4 @@
-import { DEFAULT_PROMPT, DRAFT_PREFIX, MAIN_API_PROFILE_ID, MAX_RECENT_MESSAGES, MAX_VERSIONS, DraftSession, buildMessages, completeRequest, getActivePreset, normalizeLanguage, normalizeRecentCount, normalizeSettings } from './core.js';
+import { DEFAULT_PROMPT, DRAFT_PREFIX, LEGACY_DRAFT_PREFIX, MAIN_API_PROFILE_ID, MAX_RECENT_MESSAGES, MAX_VERSIONS, DraftSession, buildMessages, completeRequest, getActivePreset, normalizeLanguage, normalizeRecentCount, normalizeSettings } from './core.js';
 
 const GHOSTWRITING_ICON = '<i class="fa-solid" aria-hidden="true">&#xf52d;</i>';
 const UNDO_ICON = '<i class="fa-solid" aria-hidden="true">&#xf2ea;</i>';
@@ -29,9 +29,23 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
     if (!editor || !send || !settingsContainer || !menu) throw new Error('SillyTavern 입력창 또는 확장 설정 영역을 찾을 수 없습니다.');
     if (!settingsHtml || !quickHtml) throw new Error('Ghostwriting 설정 화면을 읽지 못했습니다.');
     const draftKey = DRAFT_PREFIX + host.user;
+    const legacyDraftKey = LEGACY_DRAFT_PREFIX + host.user;
     let settings = normalizeSettings(host.loadSettings());
     let saved;
-    try { saved = JSON.parse(localStorage.getItem(draftKey)); } catch { /* 손상된 저장본은 적용하지 않는다. */ }
+    try {
+        const currentDraft = localStorage.getItem(draftKey);
+        const legacyDraft = localStorage.getItem(legacyDraftKey);
+        saved = JSON.parse(currentDraft ?? legacyDraft);
+        if (legacyDraft !== null) {
+            try {
+                if (currentDraft === null) localStorage.setItem(draftKey, legacyDraft);
+                localStorage.removeItem(legacyDraftKey);
+            } catch (error) {
+                // 새 키에 저장하지 못하면 이전 저장본을 유지하고 현재 창에서 복원한다.
+                console.warn('Ghostwriting: 이전 초안 저장 키 이관 실패', error);
+            }
+        }
+    } catch { /* 손상된 저장본은 적용하지 않는다. */ }
     const session = new DraftSession(saved);
     const lifetime = new AbortController();
     const disposers = [];
@@ -110,6 +124,7 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
         try {
             if (session.original) localStorage.setItem(draftKey, JSON.stringify(session.snapshot()));
             else localStorage.removeItem(draftKey);
+            localStorage.removeItem(legacyDraftKey);
         } catch {
             if (!storageWarned) host.notify('브라우저 저장 공간에 초안을 저장하지 못했습니다. 현재 창에서는 계속 사용할 수 있습니다.', 'warning');
             storageWarned = true;
@@ -586,6 +601,7 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
             cleared = true;
             session.clear();
             localStorage.removeItem(draftKey);
+            localStorage.removeItem(legacyDraftKey);
             host.removeSettings();
         },
         dispose,
