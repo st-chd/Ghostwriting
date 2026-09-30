@@ -2,3 +2,6 @@
 saucebackup/
 tests/
 test/
+
+# 파일
+AGENTS.md
