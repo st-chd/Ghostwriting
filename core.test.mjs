@@ -61,6 +61,40 @@ test('새 입력은 이전 초안의 버전을 수정하지 않는다', () => {
     assert.deepEqual(session.versions, []);
 });
 
+for (const [label, text] of [
+    ['매크로 자동완성', 'She looked at {{user}} by the door.'],
+    ['QR 문구 앞에 추가', 'After a pause, She looked at {{us by the door.'],
+    ['QR 문구 뒤에 추가', 'She looked at {{us by the door. Then she smiled.'],
+]) {
+    test(`${label}: 원문과 다른 결과를 보존한다`, () => {
+        const session = new DraftSession();
+        session.prepare('그녀가 문 옆에서 바라봤다.');
+        session.accept('first');
+        session.accept('second');
+        session.accept('She looked at {{us by the door.');
+        session.editExternal(text);
+        assert.equal(session.original, '그녀가 문 옆에서 바라봤다.');
+        assert.deepEqual(session.versions, ['first', 'second', text]);
+        assert.equal(session.selected, 2);
+        const restored = new DraftSession(session.snapshot());
+        assert.equal(restored.select(-1), '그녀가 문 옆에서 바라봤다.');
+        assert.equal(restored.select(2), text);
+    });
+}
+
+test('외부 전체 교체와 비우기는 이전 결과를 초기화한다', () => {
+    const session = new DraftSession();
+    session.prepare('첫 원문');
+    session.accept('She opened the window.');
+    session.editExternal('새로운 한글 초안');
+    assert.equal(session.original, '새로운 한글 초안');
+    assert.deepEqual(session.versions, []);
+    session.accept('another version');
+    session.editExternal(' ');
+    assert.equal(session.original, '');
+    assert.deepEqual(session.versions, []);
+});
+
 test('메시지 구성은 원문과 최근 대화만 포함한다', () => {
     const settings = normalizeSettings({ recentCount: 1 });
     const messages = buildMessages({

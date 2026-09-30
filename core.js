@@ -187,6 +187,20 @@ export class DraftSession {
         if (this.selected >= 0 && text.trim() && !this.isNewDraft(text)) this.versions[this.selected] = text;
     }
 
+    editExternal(text) {
+        const previous = this.input;
+        if (!text.trim()) { this.edit(text); return; }
+        if (!this.original || text === previous) { this.edit(text); return; }
+        let prefix = 0;
+        while (prefix < previous.length && prefix < text.length && previous[prefix] === text[prefix]) prefix++;
+        let suffix = 0;
+        while (suffix < previous.length - prefix && suffix < text.length - prefix
+            && previous[previous.length - suffix - 1] === text[text.length - suffix - 1]) suffix++;
+        // 자동완성과 QR 추가는 기존 내용 대부분을 유지하므로 결과 수정으로 보존한다.
+        if (prefix + suffix >= Math.ceil(previous.length / 2)) this.edit(text);
+        else this.start(text);
+    }
+
     start(text) {
         this.clear();
         this.original = text;

@@ -257,7 +257,7 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
             const result = await completeRequest(() => host.request(profile, messages, controller.signal), controller.signal);
             if (!active || request !== controller) return;
             if (editor.value !== inputBefore) {
-                session.edit(editor.value);
+                session.editExternal(editor.value);
                 host.notify('작성 중 입력창이 바뀌어 결과를 적용하지 않았습니다.', 'warning');
                 return;
             }
@@ -279,8 +279,7 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
 
     async function onWrite(event) {
         if (request) { request.abort(); return; }
-        if (session.original && editor.value !== session.input) session.start(editor.value);
-        else session.edit(editor.value);
+        session.editExternal(editor.value);
         if (session.versions.length && !session.isNewDraft(editor.value) && list.hidden) {
             showList();
             if (event?.detail === 0) preview.focus({ preventScroll: true });
@@ -293,7 +292,7 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
     function restore() {
         if (!session.original) return;
         if (!editor.value || editor.value === session.input) setInput(session.input);
-        else session.start(editor.value);
+        else session.editExternal(editor.value);
         render();
     }
 
@@ -326,7 +325,7 @@ export function createGhostwritingApp(host, settingsHtml, quickHtml) {
         // 다른 확장이 작성 도중 입력을 바꾸면 해당 요청을 중단하고 새 입력을 보존한다.
         if (request) request.abort();
         if (!editor.value.trim()) { clearDraft(); return; }
-        if (!event.isTrusted && session.original) session.start(editor.value);
+        if (!event.isTrusted) session.editExternal(editor.value);
         else session.edit(editor.value);
         closeList();
         render();

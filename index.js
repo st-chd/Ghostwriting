@@ -10,7 +10,6 @@ import { createGhostwritingApp } from './app.js';
 
 let app;
 let readyListener;
-let loading = false;
 let activation = 0;
 const fallbackNotified = new Set();
 const extensionPath = (() => {
@@ -149,10 +148,11 @@ function makeHost() {
 
 export function init() {
     if (readyListener) return;
+    let loading = false;
+    const currentActivation = activation;
     readyListener = async () => {
-        if (app || loading) return;
+        if (app || loading || currentActivation !== activation) return;
         loading = true;
-        const currentActivation = activation;
         try {
             const [html, quickHtml] = await Promise.all([
                 renderExtensionTemplateAsync(extensionPath, 'settings'),
@@ -160,7 +160,9 @@ export function init() {
             ]);
             if (currentActivation !== activation) return;
             app = createGhostwritingApp(makeHost(), html, quickHtml);
-        } catch (error) { globalThis.toastr?.error(error.message, 'Ghostwriting', { escapeHtml: true }); }
+        } catch (error) {
+            if (currentActivation === activation) globalThis.toastr?.error(error.message, 'Ghostwriting', { escapeHtml: true });
+        }
         finally { loading = false; }
     };
     const context = getContext();
