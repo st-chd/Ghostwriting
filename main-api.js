@@ -5,6 +5,7 @@ import { getTextGenGenerationData } from '../../../textgen-settings.js';
 import { kai_settings, koboldai_settings, koboldai_setting_names, getKoboldGenerationData } from '../../../kai-settings.js';
 import { nai_settings, novelai_settings, novelai_setting_names, getNovelGenerationData } from '../../../nai-settings.js';
 import { generateHorde } from '../../../horde.js';
+import { describeError } from './core.js';
 
 async function responseErrorDetail(response) {
     let body;
@@ -12,11 +13,7 @@ async function responseErrorDetail(response) {
     catch {
         try { body = await response.text(); } catch { body = ''; }
     }
-    let detail = body?.error?.message ?? body?.error ?? body?.message ?? body;
-    if (detail && typeof detail === 'object') {
-        try { detail = JSON.stringify(detail); } catch { detail = ''; }
-    }
-    return typeof detail === 'string' ? detail.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
+    return describeError(body);
 }
 
 export async function requestMainApi(api, messages, signal) {
