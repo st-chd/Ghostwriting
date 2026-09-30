@@ -197,8 +197,8 @@ export function onClean() {
         host.removeSettings();
     }
     try {
-        for (const key of Object.keys(localStorage)) {
-            if (key.startsWith(DRAFT_PREFIX) || key.startsWith(LEGACY_DRAFT_PREFIX)) localStorage.removeItem(key);
+        for (const prefix of [DRAFT_PREFIX, LEGACY_DRAFT_PREFIX]) {
+            localStorage.removeItem(prefix + host.user);
         }
     } catch (error) { console.warn('Ghostwriting: 초안 저장소 정리 실패', error); }
     dispose();

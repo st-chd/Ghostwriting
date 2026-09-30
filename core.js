@@ -199,7 +199,7 @@ export class DraftSession {
         while (suffix < previous.length - prefix && suffix < text.length - prefix
             && previous[previous.length - suffix - 1] === text[text.length - suffix - 1]) suffix++;
         // 자동완성과 QR 추가는 기존 내용 대부분을 유지하므로 결과 수정으로 보존한다.
-        if (prefix + suffix >= Math.ceil(previous.length / 2)) this.edit(text);
+        if (text.includes(previous) || prefix + suffix >= Math.ceil(previous.length / 2)) this.edit(text);
         else this.start(text);
     }
 
